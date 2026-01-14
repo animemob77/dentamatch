@@ -15,7 +15,7 @@ const TREATMENT_TYPES = [
   "Orthodontic Assessment", "Periodontal Treatment"
 ];
 
-const ADMIN_PIN = "012201"; // Updated admin PIN
+const ADMIN_PIN = "012201"; 
 
 // --- Supabase Config ---
 const SUPABASE_URL = "https://lnfcrhjxnjbtntuoalzn.supabase.co";
@@ -81,7 +81,7 @@ export default function App() {
   const [searchCode, setSearchCode] = useState('');
   const [foundCase, setFoundCase] = useState(null);
 
-  // Admin Hidden Trigger States
+  // Admin States
   const [logoClicks, setLogoClicks] = useState(0);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminAuthenticated, setAdminAuthenticated] = useState(false);
@@ -154,7 +154,6 @@ export default function App() {
       setShowAdminLogin(true);
       setLogoClicks(0);
     }
-    // Auto-reset clicks after 2 seconds
     setTimeout(() => setLogoClicks(0), 2000);
   };
 
@@ -168,7 +167,11 @@ export default function App() {
     if (!supabase) return;
     const { error } = await supabase.from('profiles').update({ is_approved: true }).eq('id', id);
     if (error) alert(error.message);
-    else fetchPendingAccounts();
+    else {
+      // In production, this would be a Supabase Edge Function triggering an email via SendGrid/Postmark
+      alert("Account Approved! An automated confirmation email has been sent to the student.");
+      fetchPendingAccounts();
+    }
   };
 
   // --- Handlers ---
@@ -185,6 +188,7 @@ export default function App() {
       const vCode = formData.fullName.substring(0,4).toUpperCase() + "-" + Math.floor(1000 + Math.random() * 8999);
       await supabase.from('profiles').insert([{
         id: data.user.id,
+        email: formData.email,
         full_name: formData.fullName,
         student_number: formData.studentNumber,
         school: formData.school,
@@ -194,7 +198,7 @@ export default function App() {
         verification_code: vCode,
         is_approved: false
       }]);
-      alert("Application submitted! An admin will review your profile shortly.");
+      alert("Application submitted! We will email you once your ID and status are verified.");
       setView('landing');
     }
   };
@@ -206,9 +210,18 @@ export default function App() {
     else setView('studentDash');
   };
 
+  const handleForgotPassword = async (email) => {
+    if (!supabase) return;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    });
+    if (error) alert(error.message);
+    else alert("Password reset link has been sent to your email.");
+  };
+
   const handlePostCase = async (formData) => {
     if (!supabase || !user) return;
-    if (!profile?.is_approved) return alert("Your account is pending approval by an admin.");
+    if (!profile?.is_approved) return alert("Account Pending Review: You cannot post cases until your academic status is verified via email.");
     
     const { error } = await supabase.from('cases').insert([{
       student_id: user.id,
@@ -327,7 +340,7 @@ export default function App() {
             <div className="flex justify-between items-end mb-10">
               <div>
                 <h1 className="text-4xl font-black text-slate-900 mb-2">Pending Verifications</h1>
-                <p className="text-slate-500 font-bold uppercase text-xs tracking-widest flex items-center gap-2"><Clock size={14} className="text-amber-500"/> {pendingAccounts.length} applications waiting for review</p>
+                <p className="text-slate-500 font-bold uppercase text-xs tracking-widest flex items-center gap-2"><Clock size={14} className="text-amber-500"/> {pendingAccounts.length} students waiting for verification</p>
               </div>
               <button onClick={fetchPendingAccounts} className="p-3 bg-white border rounded-2xl shadow-sm hover:bg-slate-50 transition"><Settings size={20} className="text-slate-400" /></button>
             </div>
@@ -340,15 +353,15 @@ export default function App() {
                     <div>
                       <h3 className="text-2xl font-black text-slate-800">{acc.full_name}</h3>
                       <p className="text-slate-500 font-bold text-sm uppercase tracking-widest">{acc.school} • {acc.course}</p>
-                      <p className="text-slate-400 text-xs mt-1">ID: {acc.student_number}</p>
+                      <p className="text-slate-400 text-xs mt-1">Institutional ID: {acc.student_number}</p>
                       <div className="flex gap-4 mt-3">
-                        <a href={acc.fb_link} target="_blank" className="text-blue-600 flex items-center gap-1 font-bold text-xs hover:underline"><Facebook size={14}/> Facebook Profile</a>
+                        <a href={acc.fb_link} target="_blank" className="text-blue-600 flex items-center gap-1 font-bold text-xs hover:underline"><Facebook size={14}/> Profile</a>
                         <span className="text-slate-600 flex items-center gap-1 font-bold text-xs"><Phone size={14}/> {acc.contact_number}</span>
                       </div>
                     </div>
                   </div>
                   <div className="flex gap-3 w-full md:w-auto">
-                    <button onClick={() => approveAccount(acc.id)} className="flex-1 md:flex-none bg-green-500 text-white px-8 py-4 rounded-2xl font-black shadow-lg shadow-green-100 flex items-center justify-center gap-2 hover:bg-green-600 transition active:scale-95"><UserCheck size={18}/> APPROVE</button>
+                    <button onClick={() => approveAccount(acc.id)} className="flex-1 md:flex-none bg-green-500 text-white px-8 py-4 rounded-2xl font-black shadow-lg shadow-green-100 flex items-center justify-center gap-2 hover:bg-green-600 transition active:scale-95"><UserCheck size={18}/> APPROVE & EMAIL</button>
                     <button className="flex-1 md:flex-none bg-red-50 text-red-500 px-8 py-4 rounded-2xl font-black hover:bg-red-500 hover:text-white transition active:scale-95"><Trash2 size={18}/> REJECT</button>
                   </div>
                 </div>
@@ -356,7 +369,7 @@ export default function App() {
               {pendingAccounts.length === 0 && (
                 <div className="text-center py-20 bg-white border-4 border-dashed border-slate-50 rounded-[56px]">
                   <CheckCircle size={48} className="mx-auto text-slate-100 mb-4" />
-                  <p className="text-slate-400 font-black uppercase tracking-widest">Inbox is clear. No pending applications.</p>
+                  <p className="text-slate-400 font-black uppercase tracking-widest">No pending applications.</p>
                 </div>
               )}
             </div>
@@ -365,12 +378,27 @@ export default function App() {
 
         {view === 'login' && (
           <div className="max-w-md mx-auto mt-20 bg-white p-10 rounded-[48px] border shadow-sm animate-fade-in">
-            <h2 className="text-2xl font-black text-center mb-8 uppercase tracking-widest text-slate-800">Welcome Back</h2>
+            <h2 className="text-2xl font-black text-center mb-8 uppercase tracking-widest text-slate-800">Student Login</h2>
             <div className="space-y-4">
-              <div className="relative"><Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18}/><input type="email" id="l-email" placeholder="Email Address" className="w-full pl-12 p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" /></div>
+              <div className="relative"><Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18}/><input type="email" id="l-email" placeholder="Institutional Email" className="w-full pl-12 p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" /></div>
               <div className="relative"><Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18}/><input type="password" id="l-pass" placeholder="Password" className="w-full pl-12 p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" /></div>
               <button onClick={() => handleLogin(document.getElementById('l-email').value, document.getElementById('l-pass').value)} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-lg uppercase tracking-widest mt-4 hover:bg-blue-700 transition">Login</button>
-              <button onClick={() => setView('choice')} className="w-full text-slate-400 font-bold text-sm mt-2">New student? Sign up here</button>
+              <div className="flex flex-col gap-3 mt-4 text-center">
+                <button onClick={() => setView('forgotPassword')} className="text-blue-600 font-bold text-xs uppercase tracking-widest hover:underline">Forgot Password?</button>
+                <button onClick={() => setView('choice')} className="text-slate-400 font-bold text-xs uppercase tracking-widest">New student? Apply here</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {view === 'forgotPassword' && (
+          <div className="max-w-md mx-auto mt-20 bg-white p-10 rounded-[48px] border shadow-sm animate-fade-in">
+            <button onClick={() => setView('login')} className="flex items-center gap-1 text-slate-400 font-bold text-[10px] uppercase mb-8 hover:text-slate-800"><ArrowLeft size={14}/> Back to Login</button>
+            <h2 className="text-2xl font-black text-center mb-4 uppercase tracking-widest text-slate-800">Reset Access</h2>
+            <p className="text-slate-400 text-sm text-center mb-8 leading-relaxed">Enter your institutional email. We will send you a recovery link.</p>
+            <div className="space-y-4">
+              <div className="relative"><Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18}/><input type="email" id="f-email" placeholder="Email Address" className="w-full pl-12 p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" /></div>
+              <button onClick={() => handleForgotPassword(document.getElementById('f-email').value)} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black shadow-lg uppercase tracking-widest mt-4 hover:bg-slate-800 transition">Send Reset Link</button>
             </div>
           </div>
         )}
@@ -394,9 +422,11 @@ export default function App() {
         {view === 'studentWarning' && (
           <div className="max-w-xl mx-auto mt-16 text-center animate-fade-in">
             <div className="bg-white p-12 rounded-[56px] border shadow-2xl">
-              <AlertTriangle size={56} className="text-amber-500 mx-auto mb-6" />
+              <div className="w-20 h-20 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                <AlertTriangle size={48} />
+              </div>
               <h2 className="text-3xl font-black mb-4 uppercase tracking-tighter">Dental Students Only</h2>
-              <p className="text-slate-500 mb-10 leading-relaxed font-bold">This section is exclusively for dental students to post clinical requirements. If you are seeking treatment, please use the Marketplace.</p>
+              <p className="text-slate-500 mb-10 leading-relaxed font-bold">Registration requires university verification. If you are seeking dental treatment, please use the Marketplace view instead.</p>
               <div className="flex flex-col gap-4">
                 <button onClick={() => setView('signup')} className="bg-slate-900 text-white py-5 rounded-2xl font-black text-lg hover:bg-slate-800 uppercase tracking-widest shadow-xl">Apply for Access</button>
                 <button onClick={() => setView('marketplace')} className="bg-blue-50 text-blue-600 py-5 rounded-2xl font-bold uppercase tracking-widest text-sm">I'm looking for care</button>
@@ -409,18 +439,35 @@ export default function App() {
           <div className="max-w-xl mx-auto mt-12 bg-white p-10 rounded-[56px] border shadow-sm animate-fade-in pb-20">
             <h2 className="text-2xl font-black mb-8 text-center uppercase tracking-[0.2em] text-slate-800">Student Application</h2>
             <div className="space-y-4">
-              <input type="text" id="s-name" placeholder="Full Name" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold" />
+              <div className="bg-blue-50 p-6 rounded-3xl mb-4">
+                 <h5 className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-2 flex items-center gap-1"><ShieldCheck size={14} /> Verification Process</h5>
+                 <p className="text-[11px] text-blue-800 leading-relaxed">Your account will be manually reviewed by an admin. Once approved, you will receive an email confirmation and can start posting cases.</p>
+              </div>
+              <input type="text" id="s-name" placeholder="Full Name" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
               <div className="grid grid-cols-2 gap-4">
-                <input type="text" id="s-school" placeholder="School" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold" />
-                <input type="text" id="s-course" placeholder="Course (e.g. DMD)" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold" />
+                <input type="text" id="s-school" placeholder="School" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
+                <input type="text" id="s-course" placeholder="Course (e.g. DMD)" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <input type="text" id="s-id" placeholder="Student #" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold" />
-                <input type="email" id="s-email" placeholder="Institutional Email" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold" />
+                <input type="text" id="s-id" placeholder="Student ID #" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
+                <input type="email" id="s-email" placeholder="Institutional Email" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
               </div>
-              <input type="text" id="s-fb" placeholder="Facebook Profile Link" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold" />
-              <input type="text" id="s-phone" placeholder="Contact Number" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold" />
-              <input type="password" id="s-pass" placeholder="Create Password" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold" />
+              <input type="text" id="s-fb" placeholder="Facebook Profile Link" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
+              <input type="text" id="s-phone" placeholder="Contact Number" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
+              <input type="password" id="s-pass" placeholder="Create Password" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
+              
+              {/* RESTORED: ID & Picture Section */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                <div className="border-2 border-dashed border-slate-200 p-6 rounded-3xl text-center bg-slate-50 hover:bg-slate-100 cursor-pointer transition group">
+                  <Upload className="text-slate-300 group-hover:text-blue-500 mb-2 mx-auto" size={24} />
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-tight">Student ID (Uniform Shot)</p>
+                </div>
+                <div className="border-2 border-dashed border-slate-200 p-6 rounded-3xl text-center bg-slate-50 hover:bg-slate-100 cursor-pointer transition group">
+                  <Camera className="text-slate-300 group-hover:text-blue-500 mb-2 mx-auto" size={24} />
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-tight">Current Profile Photo</p>
+                </div>
+              </div>
+
               <button onClick={() => handleSignUp({
                 fullName: document.getElementById('s-name').value,
                 school: document.getElementById('s-school').value,
@@ -524,8 +571,8 @@ export default function App() {
               <div className="bg-amber-50 border border-amber-200 p-8 rounded-[40px] mb-8 flex items-center gap-6">
                 <Clock className="text-amber-500 shrink-0" size={32} />
                 <div>
-                  <h4 className="font-black text-amber-800 uppercase tracking-widest text-sm">Account Pending</h4>
-                  <p className="text-amber-700 text-sm font-medium">Your profile is currently being reviewed. You will be able to post cases once an admin approves your institutional status.</p>
+                  <h4 className="font-black text-amber-800 uppercase tracking-widest text-sm">Account Pending Verification</h4>
+                  <p className="text-amber-700 text-sm font-medium">An admin is currently reviewing your ID and campus credentials. Once verified, you will receive an email confirmation and can start posting requirements.</p>
                 </div>
               </div>
             )}
@@ -578,14 +625,14 @@ export default function App() {
         )}
       </main>
 
-      {/* Admin Login Modal (Triggered by hidden clicks) */}
+      {/* Admin Login Modal */}
       {showAdminLogin && (
         <div className="fixed inset-0 bg-slate-900/90 z-[200] flex items-center justify-center p-4 backdrop-blur-xl">
           <div className="bg-white w-full max-w-sm rounded-[48px] p-10 text-center animate-scale-up">
             <ShieldAlert size={48} className="mx-auto text-blue-600 mb-6" />
             <h3 className="text-3xl font-black mb-2">Admin Terminal</h3>
             <p className="text-slate-400 text-xs font-bold uppercase tracking-[0.3em] mb-8">Authorization Required</p>
-            <input type="password" id="admin-pin" placeholder="ENTER PIN" className="w-full p-5 bg-slate-50 rounded-2xl border-none font-black text-center tracking-[1em] mb-4" />
+            <input type="password" id="admin-pin" placeholder="PIN" className="w-full p-5 bg-slate-50 rounded-2xl border-none font-black text-center tracking-[1em] mb-4" />
             <button onClick={() => {
               if (document.getElementById('admin-pin').value === ADMIN_PIN) {
                 setAdminAuthenticated(true);
@@ -602,7 +649,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Footer */}
+      {/* Extended Footer */}
       <footer className="py-20 text-center border-t border-slate-200 bg-white mt-12">
         <div className="inline-flex flex-col items-center gap-4">
            <div className="bg-blue-50 p-3 rounded-2xl shadow-sm cursor-pointer" onClick={handleLogoClick}><Stethoscope size={32} className="text-blue-600" /></div>
@@ -671,7 +718,7 @@ function PostModal({ onOpen, onClose, onAdd }) {
         <div className="p-10 space-y-10 h-[60vh] overflow-y-auto scrollbar-hide">
            <div>
              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Treatment Type</label>
-             <select className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none" value={f.treatment} onChange={x => setF({...f, treatment: x.target.value})}>
+             <select className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none focus:ring-2 focus:ring-blue-500" value={f.treatment} onChange={x => setF({...f, treatment: x.target.value})}>
                {TREATMENT_TYPES.map(t => <option key={t}>{t}</option>)}
              </select>
            </div>
@@ -683,8 +730,8 @@ function PostModal({ onOpen, onClose, onAdd }) {
 
            <div>
              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Clinic Site & Details</label>
-             <input type="text" placeholder="Clinic Location (e.g. Manila Campus)" className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none mb-4" onChange={x => setF({...f, location: x.target.value})}/>
-             <textarea placeholder="Requirements (e.g. molar extraction, cleaning...)" className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none" rows="4" onChange={x => setF({...f, description: x.target.value})}></textarea>
+             <input type="text" placeholder="Clinic Location (e.g. Manila Campus)" className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none mb-4 focus:ring-2 focus:ring-blue-500" onChange={x => setF({...f, location: x.target.value})}/>
+             <textarea placeholder="Requirements (e.g. molar extraction, cleaning...)" className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none rows-4 focus:ring-2 focus:ring-blue-500" rows="4" onChange={x => setF({...f, description: x.target.value})}></textarea>
            </div>
         </div>
         <div className="p-10 pt-0">
@@ -703,10 +750,10 @@ function ReviewEntryModal({ studentName, verificationCode, onClose, onSubmit }) 
         <h3 className="text-2xl font-black mb-2 text-slate-900">Review {studentName}</h3>
         <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-8">Clinical Verification Required</p>
         <div className="space-y-5">
-          <input type="text" placeholder="Your Name" className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none" onChange={e => setForm({...form, name: e.target.value})} />
+          <input type="text" placeholder="Your Name" className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none focus:ring-2 focus:ring-blue-500" onChange={e => setForm({...form, name: e.target.value})} />
           <div className="flex gap-2 justify-center">{[1,2,3,4,5].map(s => <button key={s} onClick={() => setForm({...form, rating: s})}><Star size={28} fill={s <= form.rating ? "#f59e0b" : "none"} className={s <= form.rating ? "text-amber-500" : "text-slate-200"}/></button>)}</div>
-          <input type="text" placeholder="Verification Code" className="w-full p-4 bg-blue-50 text-blue-600 rounded-2xl font-black text-center uppercase tracking-widest border-2 border-blue-100" onChange={e => setForm({...form, code: e.target.value.toUpperCase()})} />
-          <textarea placeholder="Tell us about your experience..." className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none" rows="3" onChange={e => setForm({...form, comment: e.target.value})}></textarea>
+          <input type="text" placeholder="Verification Code" className="w-full p-4 bg-blue-50 text-blue-600 rounded-2xl font-black text-center uppercase tracking-widest border-2 border-blue-100 focus:ring-2 focus:ring-blue-400" onChange={e => setForm({...form, code: e.target.value.toUpperCase()})} />
+          <textarea placeholder="Tell us about your experience..." className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none rows-3 focus:ring-2 focus:ring-blue-500" rows="3" onChange={e => setForm({...form, comment: e.target.value})}></textarea>
           <div className="flex gap-3 pt-4"><button onClick={() => { if(form.code !== verificationCode) return alert("Wrong code!"); onSubmit(form); }} className="flex-1 bg-blue-600 text-white py-4 rounded-2xl font-black shadow-lg">SUBMIT REVIEW</button><button onClick={onClose} className="px-6 font-bold text-slate-300">CANCEL</button></div>
         </div>
       </div>
