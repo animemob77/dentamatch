@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
+// 1. STANDARD PRODUCTION IMPORT (Fixes local/Vercel errors)
+import { createClient } from '@supabase/supabase-js';
 import { 
   Search, MapPin, User, Plus, MessageCircle, ShieldCheck, ChevronRight, 
   Info, ArrowLeft, Settings, Bell, LogOut, CheckCircle, X,
@@ -18,9 +20,13 @@ const TREATMENT_TYPES = [
 const ADMIN_PIN = "012201"; 
 
 // --- Supabase Config ---
-// In a real local setup, use import.meta.env.VITE_SUPABASE_URL
+// Hardcoded for Alpha ease-of-use. 
+// (Best practice: Move these to .env.local as VITE_SUPABASE_URL later)
 const SUPABASE_URL = "https://lnfcrhjxnjbtntuoalzn.supabase.co";
 const SUPABASE_KEY = "sb_publishable_QbD2C93-sHZ6aw1pNBDbdw_NzXInFJM";
+
+// 2. Initialize Client Immediately (No useEffect/Loader needed for production)
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // --- Sub-components ---
 
@@ -74,7 +80,6 @@ export default function App() {
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [supabase, setSupabase] = useState(null);
   
   // UI States
   const [selectedCase, setSelectedCase] = useState(null);
@@ -104,32 +109,8 @@ export default function App() {
   const [adminAuthenticated, setAdminAuthenticated] = useState(false);
   const [pendingAccounts, setPendingAccounts] = useState([]);
 
-  // 1. Dynamic Supabase Loader
+  // 3. Auth & Data Listeners
   useEffect(() => {
-    const loadSupabase = async () => {
-      if (window.supabase) {
-        initSupabase();
-        return;
-      }
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
-      script.async = true;
-      script.onload = initSupabase;
-      document.body.appendChild(script);
-    };
-
-    const initSupabase = () => {
-      const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-      setSupabase(client);
-    };
-
-    loadSupabase();
-  }, []);
-
-  // 2. Auth & Data Listeners
-  useEffect(() => {
-    if (!supabase) return;
-
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       handleAuthStateChange(session);
@@ -143,7 +124,7 @@ export default function App() {
 
     init();
     return () => subscription.unsubscribe();
-  }, [supabase]);
+  }, []);
 
   const handleAuthStateChange = async (session) => {
     setUser(session?.user || null);
@@ -156,7 +137,6 @@ export default function App() {
   };
 
   const fetchCases = async () => {
-    if (!supabase) return;
     const { data } = await supabase
       .from('cases')
       .select('*, profiles(*), reviews(*)')
@@ -164,9 +144,12 @@ export default function App() {
     if (data) setCases(data);
   };
 
-  // 3. Admin & Logo Logic
+  // Admin & Logo Logic (Fixed Navigation)
   const handleLogoClick = () => {
+    // Immediate navigation to landing
     setView('landing');
+    
+    // Background counter for Admin unlock
     setLogoClicks(prev => {
       const newCount = prev + 1;
       if (newCount >= 5) {
@@ -175,17 +158,16 @@ export default function App() {
       }
       return newCount;
     });
+    // Reset counter if inactive for 2s
     setTimeout(() => setLogoClicks(0), 2000);
   };
 
   const fetchPendingAccounts = async () => {
-    if (!supabase) return;
     const { data } = await supabase.from('profiles').select('*').eq('is_approved', false);
     if (data) setPendingAccounts(data);
   };
 
   const approveAccount = async (id) => {
-    if (!supabase) return;
     setIsProcessing(true);
     const { error } = await supabase.from('profiles').update({ is_approved: true }).eq('id', id);
     if (error) alert(error.message);
@@ -196,10 +178,21 @@ export default function App() {
     setIsProcessing(false);
   };
 
+  const rejectAccount = async (id) => {
+    if (!window.confirm("Are you sure you want to reject this applicant? This action cannot be undone.")) return;
+
+    setIsProcessing(true);
+    const { error } = await supabase.from('profiles').delete().eq('id', id);
+    if (error) alert(error.message);
+    else {
+      alert("Application rejected and removed.");
+      fetchPendingAccounts();
+    }
+    setIsProcessing(false);
+  };
+
   // --- Handlers ---
   const handleSignUp = async () => {
-    if (!supabase) return;
-
     const { fullName, school, course, studentNumber, email, fbLink, contactNumber, password } = signupForm;
 
     // VALIDATION
@@ -230,15 +223,8 @@ export default function App() {
         return publicUrl;
       };
 
-      let idUrl = "", avatarUrl = "";
-      try {
-         idUrl = await uploadImg(idFile, 'id');
-         avatarUrl = await uploadImg(profileFile, 'avatar');
-      } catch (e) {
-         console.warn("Storage upload check:", e);
-         idUrl = idPreview; // Fallback for preview
-         avatarUrl = profilePreview;
-      }
+      const idUrl = await uploadImg(idFile, 'id');
+      const avatarUrl = await uploadImg(profileFile, 'avatar');
 
       // 3. Create Profile
       const vCode = fullName.substring(0,4).toUpperCase() + "-" + Math.floor(1000 + Math.random() * 8999);
@@ -268,7 +254,6 @@ export default function App() {
   };
 
   const handleLogin = async () => {
-    if (!supabase) return;
     const { email, password } = loginForm;
     if (!email || !password) return alert("Please enter your email and password.");
     
@@ -283,7 +268,7 @@ export default function App() {
   };
 
   const handleForgotPassword = async (email) => {
-    if (!supabase || !email) return alert("Email required.");
+    if (!email) return alert("Email required.");
     setIsProcessing(true);
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
     if (error) alert(error.message);
@@ -292,7 +277,7 @@ export default function App() {
   };
 
   const handlePostCase = async (formData) => {
-    if (!supabase || !user) return;
+    if (!user) return;
     if (!profile?.is_approved) return alert("Account Pending Review: You cannot post cases until your academic status is verified via email.");
     
     if (!formData.location || !formData.description || formData.selectedTeeth.length === 0) {
@@ -317,7 +302,6 @@ export default function App() {
   };
 
   const handleAddReview = async (caseId, review) => {
-    if (!supabase) return;
     if (!review.name || !review.comment) return alert("Please provide your name and experience details.");
     
     setIsProcessing(true);
@@ -457,7 +441,7 @@ export default function App() {
               {pendingAccounts.map(acc => (
                 <div key={acc.id} className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-center gap-8">
                   <div className="flex gap-6 items-center flex-1">
-                    <div className="w-20 h-20 bg-blue-50 rounded-3xl overflow-hidden flex items-center justify-center text-blue-600">
+                    <div className="w-20 h-20 bg-blue-50 rounded-3xl overflow-hidden flex items-center justify-center text-blue-600 font-black text-2xl uppercase">
                       {acc.avatar_url ? <img src={acc.avatar_url} className="w-full h-full object-cover" /> : acc.full_name?.charAt(0)}
                     </div>
                     <div>
@@ -479,7 +463,7 @@ export default function App() {
                   </div>
                   <div className="flex gap-3 w-full md:w-auto">
                     <button onClick={() => approveAccount(acc.id)} className="flex-1 md:flex-none bg-green-500 text-white px-8 py-4 rounded-2xl font-black shadow-lg shadow-green-100 flex items-center justify-center gap-2 hover:bg-green-600 transition active:scale-95"><UserCheck size={18}/> APPROVE & EMAIL</button>
-                    <button className="flex-1 md:flex-none bg-red-50 text-red-500 px-8 py-4 rounded-2xl font-black hover:bg-red-500 hover:text-white transition active:scale-95"><Trash2 size={18}/> REJECT</button>
+                    <button onClick={() => rejectAccount(acc.id)} className="flex-1 md:flex-none bg-red-50 text-red-500 px-8 py-4 rounded-2xl font-black hover:bg-red-500 hover:text-white transition active:scale-95"><Trash2 size={18}/> REJECT</button>
                   </div>
                 </div>
               ))}
