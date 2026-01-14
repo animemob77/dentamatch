@@ -83,8 +83,14 @@ export default function App() {
   const [searchCode, setSearchCode] = useState('');
   const [foundCase, setFoundCase] = useState(null);
   
-  // Image Viewer State (New)
+  // Image Viewer State
   const [viewingImage, setViewingImage] = useState(null);
+
+  // Form States (Controlled Components)
+  const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+  const [signupForm, setSignupForm] = useState({
+    fullName: '', school: '', course: '', studentNumber: '', email: '', fbLink: '', contactNumber: '', password: ''
+  });
 
   // Signup Image files
   const [idFile, setIdFile] = useState(null);
@@ -191,12 +197,15 @@ export default function App() {
   };
 
   // --- Handlers ---
-  const handleSignUp = async (formData) => {
+  const handleSignUp = async () => {
     if (!supabase) return;
 
+    const { fullName, school, course, studentNumber, email, fbLink, contactNumber, password } = signupForm;
+
     // VALIDATION
-    const required = ['fullName', 'school', 'course', 'studentNumber', 'email', 'fbLink', 'contactNumber', 'password'];
-    for (let f of required) { if (!formData[f]) return alert(`Missing: ${f.replace(/([A-Z])/g, ' $1').toLowerCase()}`); }
+    if (!fullName || !school || !course || !studentNumber || !email || !fbLink || !contactNumber || !password) {
+      return alert("Please fill in all fields.");
+    }
     if (!idFile || !profileFile) return alert("Please upload both Student ID and Profile Photo.");
 
     setIsProcessing(true);
@@ -204,8 +213,8 @@ export default function App() {
     try {
       // 1. Sign Up Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
+        email: email,
+        password: password,
       });
       if (authError) throw authError;
 
@@ -221,30 +230,27 @@ export default function App() {
         return publicUrl;
       };
 
-      // In a real deployment with storage set up, these would run. 
-      // For this preview/alpha without bucket setup, we will use placeholders if upload fails to unblock testing.
       let idUrl = "", avatarUrl = "";
       try {
          idUrl = await uploadImg(idFile, 'id');
          avatarUrl = await uploadImg(profileFile, 'avatar');
       } catch (e) {
          console.warn("Storage upload check:", e);
-         // Fallback to local preview if storage fails (for testing)
-         idUrl = idPreview;
+         idUrl = idPreview; // Fallback for preview
          avatarUrl = profilePreview;
       }
 
       // 3. Create Profile
-      const vCode = formData.fullName.substring(0,4).toUpperCase() + "-" + Math.floor(1000 + Math.random() * 8999);
+      const vCode = fullName.substring(0,4).toUpperCase() + "-" + Math.floor(1000 + Math.random() * 8999);
       const { error: profileError } = await supabase.from('profiles').insert([{
         id: userId,
-        email: formData.email,
-        full_name: formData.fullName,
-        student_number: formData.studentNumber,
-        school: formData.school,
-        course: formData.course,
-        fb_link: formData.fbLink,
-        contact_number: formData.contactNumber,
+        email: email,
+        full_name: fullName,
+        student_number: studentNumber,
+        school: school,
+        course: course,
+        fb_link: fbLink,
+        contact_number: contactNumber,
         verification_code: vCode,
         id_url: idUrl,
         avatar_url: avatarUrl,
@@ -255,18 +261,24 @@ export default function App() {
       alert("Application submitted! We will email you once verified.");
       setView('landing');
     } catch (err) {
-      alert(err.message);
+      alert("Registration Error: " + err.message);
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const handleLogin = async (email, password) => {
-    if (!supabase || !email || !password) return alert("Check credentials.");
+  const handleLogin = async () => {
+    if (!supabase) return;
+    const { email, password } = loginForm;
+    if (!email || !password) return alert("Please enter your email and password.");
+    
     setIsProcessing(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) alert(error.message);
-    else setView('studentDash');
+    if (error) {
+      alert("Login Failed: " + error.message);
+    } else {
+      setView('studentDash');
+    }
     setIsProcessing(false);
   };
 
@@ -281,8 +293,11 @@ export default function App() {
 
   const handlePostCase = async (formData) => {
     if (!supabase || !user) return;
-    if (!profile?.is_approved) return alert("Pending Review: Post access disabled until verified.");
-    if (!formData.location || !formData.description || formData.selectedTeeth.length === 0) return alert("Missing details.");
+    if (!profile?.is_approved) return alert("Account Pending Review: You cannot post cases until your academic status is verified via email.");
+    
+    if (!formData.location || !formData.description || formData.selectedTeeth.length === 0) {
+      return alert("Incomplete Details: Please fill in clinic site, description, and select at least one tooth.");
+    }
 
     setIsProcessing(true);
     const { error } = await supabase.from('cases').insert([{
@@ -294,12 +309,17 @@ export default function App() {
     }]);
 
     if (error) alert(error.message);
-    else { setIsPostModalOpen(false); fetchCases(); }
+    else {
+      setIsPostModalOpen(false);
+      fetchCases();
+    }
     setIsProcessing(false);
   };
 
   const handleAddReview = async (caseId, review) => {
-    if (!supabase || !review.name || !review.comment) return alert("Missing details.");
+    if (!supabase) return;
+    if (!review.name || !review.comment) return alert("Please provide your name and experience details.");
+    
     setIsProcessing(true);
     const { error } = await supabase.from('reviews').insert([{
       case_id: caseId,
@@ -307,8 +327,14 @@ export default function App() {
       rating: review.rating,
       comment: review.comment
     }]);
+
     if (error) alert(error.message);
-    else { alert("Review posted!"); fetchCases(); setGlobalReviewSearch(false); setFoundCase(null); }
+    else {
+      alert("Review posted!");
+      fetchCases();
+      setGlobalReviewSearch(false);
+      setFoundCase(null);
+    }
     setIsProcessing(false);
   };
 
@@ -471,9 +497,9 @@ export default function App() {
           <div className="max-w-md mx-auto mt-20 bg-white p-10 rounded-[48px] border shadow-sm animate-fade-in">
             <h2 className="text-2xl font-black text-center mb-8 uppercase tracking-widest text-slate-800">Student Login</h2>
             <div className="space-y-4">
-              <div className="relative"><Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18}/><input type="email" id="l-email" placeholder="Institutional Email" className="w-full pl-12 p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" /></div>
-              <div className="relative"><Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18}/><input type="password" id="l-pass" placeholder="Password" className="w-full pl-12 p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" /></div>
-              <button onClick={() => handleLogin(document.getElementById('l-email').value, document.getElementById('l-pass').value)} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-lg uppercase tracking-widest mt-4 hover:bg-blue-700 transition">Login</button>
+              <div className="relative"><Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18}/><input type="email" value={loginForm.email} onChange={e => setLoginForm({...loginForm, email: e.target.value})} placeholder="Institutional Email" className="w-full pl-12 p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" /></div>
+              <div className="relative"><Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18}/><input type="password" value={loginForm.password} onChange={e => setLoginForm({...loginForm, password: e.target.value})} placeholder="Password" className="w-full pl-12 p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" /></div>
+              <button onClick={handleLogin} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-lg uppercase tracking-widest mt-4 hover:bg-blue-700 transition">Login</button>
               <div className="flex flex-col gap-3 mt-4 text-center">
                 <button onClick={() => setView('forgotPassword')} className="text-blue-600 font-bold text-xs uppercase tracking-widest hover:underline">Forgot Password?</button>
                 <button onClick={() => setView('choice')} className="text-slate-400 font-bold text-xs uppercase tracking-widest">New student? Apply here</button>
@@ -534,18 +560,18 @@ export default function App() {
                  <h5 className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-2 flex items-center gap-1"><ShieldCheck size={14} /> Verification Process</h5>
                  <p className="text-[11px] text-blue-800 leading-relaxed">Your account will be manually reviewed by an admin. Once approved, you will receive an email confirmation and can start posting cases.</p>
               </div>
-              <input type="text" id="s-name" placeholder="Full Name" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
+              <input type="text" value={signupForm.fullName} onChange={e => setSignupForm({...signupForm, fullName: e.target.value})} placeholder="Full Name" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
               <div className="grid grid-cols-2 gap-4">
-                <input type="text" id="s-school" placeholder="School" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
-                <input type="text" id="s-course" placeholder="Course (e.g. DMD)" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
+                <input type="text" value={signupForm.school} onChange={e => setSignupForm({...signupForm, school: e.target.value})} placeholder="School" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
+                <input type="text" value={signupForm.course} onChange={e => setSignupForm({...signupForm, course: e.target.value})} placeholder="Course (e.g. DMD)" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <input type="text" id="s-id" placeholder="Student ID #" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
-                <input type="email" id="s-email" placeholder="Institutional Email" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
+                <input type="text" value={signupForm.studentNumber} onChange={e => setSignupForm({...signupForm, studentNumber: e.target.value})} placeholder="Student ID #" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
+                <input type="email" value={signupForm.email} onChange={e => setSignupForm({...signupForm, email: e.target.value})} placeholder="Institutional Email" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
               </div>
-              <input type="text" id="s-fb" placeholder="Facebook Profile Link" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
-              <input type="text" id="s-phone" placeholder="Contact Number" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
-              <input type="password" id="s-pass" placeholder="Create Password" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
+              <input type="text" value={signupForm.fbLink} onChange={e => setSignupForm({...signupForm, fbLink: e.target.value})} placeholder="Facebook Profile Link" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
+              <input type="text" value={signupForm.contactNumber} onChange={e => setSignupForm({...signupForm, contactNumber: e.target.value})} placeholder="Contact Number" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
+              <input type="password" value={signupForm.password} onChange={e => setSignupForm({...signupForm, password: e.target.value})} placeholder="Create Password" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
               
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
                 <div 
@@ -571,16 +597,7 @@ export default function App() {
                 </div>
               </div>
 
-              <button onClick={() => handleSignUp({
-                fullName: document.getElementById('s-name').value,
-                school: document.getElementById('s-school').value,
-                course: document.getElementById('s-course').value,
-                studentNumber: document.getElementById('s-id').value,
-                email: document.getElementById('s-email').value,
-                fbLink: document.getElementById('s-fb').value,
-                contactNumber: document.getElementById('s-phone').value,
-                password: document.getElementById('s-pass').value
-              })} className="w-full bg-blue-600 text-white py-5 rounded-3xl font-black shadow-xl uppercase tracking-widest mt-6 hover:bg-blue-700 transition">Submit Application</button>
+              <button onClick={handleSignUp} className="w-full bg-blue-600 text-white py-5 rounded-3xl font-black shadow-xl uppercase tracking-widest mt-6 hover:bg-blue-700 transition">Submit Application</button>
             </div>
           </div>
         )}
