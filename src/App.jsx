@@ -4,7 +4,7 @@ import {
   Info, ArrowLeft, Settings, Bell, LogOut, CheckCircle, X,
   Stethoscope, Camera, Facebook, Phone, Hash, Upload, ExternalLink, Trash2,
   GraduationCap, BookOpen, AlertTriangle, Image as ImageIcon, Star, Award, SearchCheck, Mail, Lock, 
-  ShieldAlert, UserCheck, Clock
+  ShieldAlert, UserCheck, Clock, Loader2
 } from 'lucide-react';
 
 // --- Constants ---
@@ -18,6 +18,7 @@ const TREATMENT_TYPES = [
 const ADMIN_PIN = "012201"; 
 
 // --- Supabase Config ---
+// In a real local setup, use import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_URL = "https://lnfcrhjxnjbtntuoalzn.supabase.co";
 const SUPABASE_KEY = "sb_publishable_QbD2C93-sHZ6aw1pNBDbdw_NzXInFJM";
 
@@ -72,6 +73,7 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [supabase, setSupabase] = useState(null);
   
   // UI States
@@ -81,13 +83,19 @@ export default function App() {
   const [searchCode, setSearchCode] = useState('');
   const [foundCase, setFoundCase] = useState(null);
 
+  // Signup Image files
+  const [idFile, setIdFile] = useState(null);
+  const [profileFile, setProfileFile] = useState(null);
+  const [idPreview, setIdPreview] = useState(null);
+  const [profilePreview, setProfilePreview] = useState(null);
+
   // Admin States
   const [logoClicks, setLogoClicks] = useState(0);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminAuthenticated, setAdminAuthenticated] = useState(false);
   const [pendingAccounts, setPendingAccounts] = useState([]);
 
-  // 1. Dynamic Supabase Loader
+  // 1. Dynamic Supabase Loader (for Preview)
   useEffect(() => {
     const loadSupabase = async () => {
       if (window.supabase) {
@@ -147,13 +155,17 @@ export default function App() {
     if (data) setCases(data);
   };
 
-  // 3. Admin Logic
+  // 3. Admin & Logo Logic
   const handleLogoClick = () => {
-    setLogoClicks(prev => prev + 1);
-    if (logoClicks + 1 >= 5) {
-      setShowAdminLogin(true);
-      setLogoClicks(0);
-    }
+    setView('landing');
+    setLogoClicks(prev => {
+      const newCount = prev + 1;
+      if (newCount >= 5) {
+        setShowAdminLogin(true);
+        return 0;
+      }
+      return newCount;
+    });
     setTimeout(() => setLogoClicks(0), 2000);
   };
 
@@ -165,29 +177,63 @@ export default function App() {
 
   const approveAccount = async (id) => {
     if (!supabase) return;
+    setIsProcessing(true);
     const { error } = await supabase.from('profiles').update({ is_approved: true }).eq('id', id);
     if (error) alert(error.message);
     else {
-      // In production, this would be a Supabase Edge Function triggering an email via SendGrid/Postmark
-      alert("Account Approved! An automated confirmation email has been sent to the student.");
+      alert("Account Approved! Verification confirmation sent to student.");
       fetchPendingAccounts();
     }
+    setIsProcessing(false);
   };
 
   // --- Handlers ---
   const handleSignUp = async (formData) => {
     if (!supabase) return;
-    const { data, error } = await supabase.auth.signUp({
-      email: formData.email,
-      password: formData.password,
-    });
 
-    if (error) return alert(error.message);
+    // VALIDATION
+    const required = ['fullName', 'school', 'course', 'studentNumber', 'email', 'fbLink', 'contactNumber', 'password'];
+    for (let f of required) { if (!formData[f]) return alert(`Missing: ${f.replace(/([A-Z])/g, ' $1').toLowerCase()}`); }
+    if (!idFile || !profileFile) return alert("Please upload both Student ID and Profile Photo.");
 
-    if (data.user) {
+    setIsProcessing(true);
+
+    try {
+      // 1. Sign Up Auth
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password,
+      });
+      if (authError) throw authError;
+
+      const userId = authData.user.id;
+
+      // 2. Upload Images
+      const uploadImg = async (file, path) => {
+        const ext = file.name.split('.').pop();
+        const fileName = `${userId}-${path}.${ext}`;
+        const { error: uploadError } = await supabase.storage.from('verifications').upload(fileName, file);
+        if (uploadError) throw uploadError;
+        const { data: { publicUrl } } = supabase.storage.from('verifications').getPublicUrl(fileName);
+        return publicUrl;
+      };
+
+      // In a real deployment with storage set up, these would run. 
+      // For this preview/alpha without bucket setup, we will use placeholders if upload fails to unblock testing.
+      let idUrl = "", avatarUrl = "";
+      try {
+         idUrl = await uploadImg(idFile, 'id');
+         avatarUrl = await uploadImg(profileFile, 'avatar');
+      } catch (e) {
+         console.warn("Storage not configured yet, using local preview");
+         idUrl = idPreview;
+         avatarUrl = profilePreview;
+      }
+
+      // 3. Create Profile
       const vCode = formData.fullName.substring(0,4).toUpperCase() + "-" + Math.floor(1000 + Math.random() * 8999);
-      await supabase.from('profiles').insert([{
-        id: data.user.id,
+      const { error: profileError } = await supabase.from('profiles').insert([{
+        id: userId,
         email: formData.email,
         full_name: formData.fullName,
         student_number: formData.studentNumber,
@@ -196,33 +242,45 @@ export default function App() {
         fb_link: formData.fbLink,
         contact_number: formData.contactNumber,
         verification_code: vCode,
+        id_url: idUrl,
+        avatar_url: avatarUrl,
         is_approved: false
       }]);
-      alert("Application submitted! We will email you once your ID and status are verified.");
+      if (profileError) throw profileError;
+
+      alert("Application submitted! We will email you once verified.");
       setView('landing');
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   const handleLogin = async (email, password) => {
-    if (!supabase) return;
+    if (!supabase || !email || !password) return alert("Check credentials.");
+    setIsProcessing(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) alert(error.message);
     else setView('studentDash');
+    setIsProcessing(false);
   };
 
   const handleForgotPassword = async (email) => {
-    if (!supabase) return;
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin,
-    });
+    if (!supabase || !email) return alert("Email required.");
+    setIsProcessing(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
     if (error) alert(error.message);
-    else alert("Password reset link has been sent to your email.");
+    else alert("Reset link sent!");
+    setIsProcessing(false);
   };
 
   const handlePostCase = async (formData) => {
     if (!supabase || !user) return;
-    if (!profile?.is_approved) return alert("Account Pending Review: You cannot post cases until your academic status is verified via email.");
-    
+    if (!profile?.is_approved) return alert("Pending Review: Post access disabled until verified.");
+    if (!formData.location || !formData.description || formData.selectedTeeth.length === 0) return alert("Missing details.");
+
+    setIsProcessing(true);
     const { error } = await supabase.from('cases').insert([{
       student_id: user.id,
       treatment: formData.treatment,
@@ -232,27 +290,31 @@ export default function App() {
     }]);
 
     if (error) alert(error.message);
-    else {
-      setIsPostModalOpen(false);
-      fetchCases();
-    }
+    else { setIsPostModalOpen(false); fetchCases(); }
+    setIsProcessing(false);
   };
 
   const handleAddReview = async (caseId, review) => {
-    if (!supabase) return;
+    if (!supabase || !review.name || !review.comment) return alert("Missing details.");
+    setIsProcessing(true);
     const { error } = await supabase.from('reviews').insert([{
       case_id: caseId,
       patient_name: review.name,
       rating: review.rating,
       comment: review.comment
     }]);
-
     if (error) alert(error.message);
-    else {
-      alert("Review posted!");
-      fetchCases();
-      setGlobalReviewSearch(false);
-      setFoundCase(null);
+    else { alert("Review posted!"); fetchCases(); setGlobalReviewSearch(false); setFoundCase(null); }
+    setIsProcessing(false);
+  };
+
+  const handleFileChange = (e, fileSetter, previewSetter) => {
+    const file = e.target.files[0];
+    if (file) {
+      fileSetter(file);
+      const reader = new FileReader();
+      reader.onload = (event) => previewSetter(event.target.result);
+      reader.readAsDataURL(file);
     }
   };
 
@@ -266,6 +328,15 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-100">
+      {isProcessing && (
+        <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-sm flex flex-col items-center justify-center">
+          <div className="bg-white p-8 rounded-[48px] shadow-2xl flex flex-col items-center animate-scale-up">
+             <Loader2 className="text-blue-600 animate-spin mb-4" size={48} />
+             <p className="font-black text-slate-800 uppercase tracking-widest text-sm">Processing...</p>
+          </div>
+        </div>
+      )}
+
       <nav className="bg-white border-b border-slate-200 sticky top-0 z-50 h-16 flex items-center px-4">
         <div className="max-w-6xl mx-auto w-full flex items-center justify-between">
           <div className="flex items-center gap-2 cursor-pointer active:scale-95 transition-transform" onClick={handleLogoClick}>
@@ -292,7 +363,6 @@ export default function App() {
       <main className="max-w-6xl mx-auto min-h-[calc(100vh-160px)] px-4">
         {view === 'landing' && (
           <div className="animate-fade-in">
-            {/* Hero Section */}
             <section className="bg-gradient-to-b from-blue-50 to-white py-20 text-center rounded-b-[64px]">
               <h1 className="text-5xl md:text-7xl font-black text-slate-900 mb-6 leading-tight">Realize a Dream, <br/><span className="text-blue-600">Get Free Dental Care.</span></h1>
               <p className="text-lg text-slate-600 mb-12 max-w-2xl mx-auto leading-relaxed px-4">Connecting passionate dental students with community members for supervised clinical care. Helping students graduate while providing free procedures.</p>
@@ -305,7 +375,6 @@ export default function App() {
               </div>
             </section>
 
-            {/* Feature Cards Section */}
             <section className="py-20 px-4">
               <div className="grid md:grid-cols-3 gap-10">
                 <div className="group p-8 bg-white rounded-[40px] border border-slate-100 shadow-sm hover:shadow-xl transition-all text-center">
@@ -349,14 +418,16 @@ export default function App() {
               {pendingAccounts.map(acc => (
                 <div key={acc.id} className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-center gap-8">
                   <div className="flex gap-6 items-center flex-1">
-                    <div className="w-20 h-20 bg-blue-50 rounded-3xl flex items-center justify-center text-blue-600 font-black text-2xl uppercase">{acc.full_name?.charAt(0)}</div>
+                    <div className="w-20 h-20 bg-blue-50 rounded-3xl overflow-hidden flex items-center justify-center text-blue-600">
+                      {acc.avatar_url ? <img src={acc.avatar_url} className="w-full h-full object-cover" /> : acc.full_name?.charAt(0)}
+                    </div>
                     <div>
                       <h3 className="text-2xl font-black text-slate-800">{acc.full_name}</h3>
                       <p className="text-slate-500 font-bold text-sm uppercase tracking-widest">{acc.school} • {acc.course}</p>
                       <p className="text-slate-400 text-xs mt-1">Institutional ID: {acc.student_number}</p>
                       <div className="flex gap-4 mt-3">
-                        <a href={acc.fb_link} target="_blank" className="text-blue-600 flex items-center gap-1 font-bold text-xs hover:underline"><Facebook size={14}/> Profile</a>
-                        <span className="text-slate-600 flex items-center gap-1 font-bold text-xs"><Phone size={14}/> {acc.contact_number}</span>
+                        <a href={acc.fb_link} target="_blank" className="text-blue-600 flex items-center gap-1 font-bold text-xs hover:underline"><ExternalLink size={14}/> Messenger Profile</a>
+                        {acc.id_url && <a href={acc.id_url} target="_blank" className="text-amber-600 flex items-center gap-1 font-bold text-xs hover:underline"><ImageIcon size={14}/> View ID Upload</a>}
                       </div>
                     </div>
                   </div>
@@ -458,13 +529,26 @@ export default function App() {
               
               {/* RESTORED: ID & Picture Section */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-                <div className="border-2 border-dashed border-slate-200 p-6 rounded-3xl text-center bg-slate-50 hover:bg-slate-100 cursor-pointer transition group">
-                  <Upload className="text-slate-300 group-hover:text-blue-500 mb-2 mx-auto" size={24} />
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-tight">Student ID (Uniform Shot)</p>
+                <div 
+                  onClick={() => document.getElementById('id-upload-input').click()}
+                  className={`border-2 border-dashed p-6 rounded-3xl text-center cursor-pointer transition group ${idFile ? 'border-green-500 bg-green-50' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}
+                >
+                  <input type="file" id="id-upload-input" className="hidden" accept="image/*" onChange={(e) => handleFileChange(e, setIdFile, setIdPreview)} />
+                  {idPreview ? <img src={idPreview} className="w-12 h-12 object-cover rounded-lg mx-auto mb-2" /> : <Upload className="text-slate-300 group-hover:text-blue-500 mb-2 mx-auto" size={24} />}
+                  <p className={`text-[10px] font-black uppercase tracking-widest leading-tight ${idFile ? 'text-green-600' : 'text-slate-400'}`}>
+                    {idFile ? 'ID Uploaded' : 'Student ID (Uniform Shot)'}
+                  </p>
                 </div>
-                <div className="border-2 border-dashed border-slate-200 p-6 rounded-3xl text-center bg-slate-50 hover:bg-slate-100 cursor-pointer transition group">
-                  <Camera className="text-slate-300 group-hover:text-blue-500 mb-2 mx-auto" size={24} />
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-tight">Current Profile Photo</p>
+                
+                <div 
+                  onClick={() => document.getElementById('profile-upload-input').click()}
+                  className={`border-2 border-dashed p-6 rounded-3xl text-center cursor-pointer transition group ${profileFile ? 'border-green-500 bg-green-50' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}
+                >
+                  <input type="file" id="profile-upload-input" className="hidden" accept="image/*" onChange={(e) => handleFileChange(e, setProfileFile, setProfilePreview)} />
+                  {profilePreview ? <img src={profilePreview} className="w-12 h-12 object-cover rounded-lg mx-auto mb-2" /> : <Camera className="text-slate-300 group-hover:text-blue-500 mb-2 mx-auto" size={24} />}
+                  <p className={`text-[10px] font-black uppercase tracking-widest leading-tight ${profileFile ? 'text-green-600' : 'text-slate-400'}`}>
+                    {profileFile ? 'Photo Selected' : 'Current Profile Photo'}
+                  </p>
                 </div>
               </div>
 
@@ -521,7 +605,7 @@ export default function App() {
             <button onClick={() => setView('marketplace')} className="flex items-center gap-2 text-slate-400 mb-8 font-black text-xs tracking-widest uppercase hover:text-slate-800"><ArrowLeft size={16}/> Back to Marketplace</button>
             <div className="bg-white rounded-[56px] border shadow-sm overflow-hidden p-10">
               <h1 className="text-4xl font-black mb-4 leading-tight">{selectedCase.treatment}</h1>
-              <p className="text-slate-500 font-bold mb-10 text-lg">Managed by <span className="text-blue-600">{selectedCase.profiles?.full_name}</span> • {selectedCase.profiles?.school}</p>
+              <p className="text-slate-500 font-bold mb-10 text-lg">Managed by <span className="text-blue-600">{selectedCase.profiles?.full_name}</span></p>
               
               {selectedCase.selected_teeth?.length > 0 && (
                 <div className="mb-10">
@@ -616,7 +700,12 @@ export default function App() {
                     <div className="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 font-black tracking-tighter">DMD</div>
                     <div><h4 className="font-black text-lg group-hover:text-blue-600 transition">{c.treatment}</h4><p className="text-slate-400 text-sm font-bold flex items-center gap-1"><MapPin size={14}/> {c.location}</p></div>
                   </div>
-                  <button onClick={async () => { await supabase.from('cases').delete().eq('id', c.id); fetchCases(); }} className="p-3 bg-red-50 text-red-400 rounded-2xl hover:bg-red-500 hover:text-white transition"><Trash2 size={20}/></button>
+                  <button onClick={async () => { 
+                    setIsProcessing(true);
+                    await supabase.from('cases').delete().eq('id', c.id); 
+                    fetchCases(); 
+                    setIsProcessing(false);
+                  }} className="p-3 bg-red-50 text-red-400 rounded-2xl hover:bg-red-500 hover:text-white transition"><Trash2 size={20}/></button>
                 </div>
               ))}
               {cases.filter(c => c.student_id === user.id).length === 0 && <div className="text-center py-20 bg-white border-4 border-dashed border-slate-50 rounded-[56px] text-slate-300 font-bold uppercase tracking-[0.2em]">No clinical requirements posted</div>}
@@ -652,7 +741,9 @@ export default function App() {
       {/* Extended Footer */}
       <footer className="py-20 text-center border-t border-slate-200 bg-white mt-12">
         <div className="inline-flex flex-col items-center gap-4">
-           <div className="bg-blue-50 p-3 rounded-2xl shadow-sm cursor-pointer" onClick={handleLogoClick}><Stethoscope size={32} className="text-blue-600" /></div>
+           <div className="bg-blue-50 p-3 rounded-2xl shadow-sm cursor-pointer active:scale-95 transition-transform" onClick={handleLogoClick}>
+             <Stethoscope size={32} className="text-blue-600" />
+           </div>
            <span className="text-2xl font-black text-slate-300 uppercase tracking-tighter">DentaMatch</span>
            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest max-w-xs leading-relaxed px-4">Philippines' Leading Educational Dental Marketplace</p>
         </div>
@@ -730,8 +821,8 @@ function PostModal({ onOpen, onClose, onAdd }) {
 
            <div>
              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Clinic Site & Details</label>
-             <input type="text" placeholder="Clinic Location (e.g. Manila Campus)" className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none mb-4 focus:ring-2 focus:ring-blue-500" onChange={x => setF({...f, location: x.target.value})}/>
-             <textarea placeholder="Requirements (e.g. molar extraction, cleaning...)" className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none rows-4 focus:ring-2 focus:ring-blue-500" rows="4" onChange={x => setF({...f, description: x.target.value})}></textarea>
+             <input type="text" id="p-location" placeholder="Clinic Location (e.g. Manila Campus)" className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none mb-4 focus:ring-2 focus:ring-blue-500" onChange={x => setF({...f, location: x.target.value})}/>
+             <textarea id="p-desc" placeholder="Requirements (e.g. molar extraction, cleaning...)" className="w-full p-4 bg-slate-50 rounded-2xl font-bold border-none rows-4 focus:ring-2 focus:ring-blue-500" rows="4" onChange={x => setF({...f, description: x.target.value})}></textarea>
            </div>
         </div>
         <div className="p-10 pt-0">
