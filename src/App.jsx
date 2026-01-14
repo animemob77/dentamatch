@@ -4,7 +4,7 @@ import {
   Info, ArrowLeft, Settings, Bell, LogOut, CheckCircle, X,
   Stethoscope, Camera, Facebook, Phone, Hash, Upload, ExternalLink, Trash2,
   GraduationCap, BookOpen, AlertTriangle, Image as ImageIcon, Star, Award, SearchCheck, Mail, Lock, 
-  ShieldAlert, UserCheck, Clock, Loader2
+  ShieldAlert, UserCheck, Clock, Loader2, Eye
 } from 'lucide-react';
 
 // --- Constants ---
@@ -82,6 +82,9 @@ export default function App() {
   const [globalReviewSearch, setGlobalReviewSearch] = useState(false);
   const [searchCode, setSearchCode] = useState('');
   const [foundCase, setFoundCase] = useState(null);
+  
+  // Image Viewer State (New)
+  const [viewingImage, setViewingImage] = useState(null);
 
   // Signup Image files
   const [idFile, setIdFile] = useState(null);
@@ -95,7 +98,7 @@ export default function App() {
   const [adminAuthenticated, setAdminAuthenticated] = useState(false);
   const [pendingAccounts, setPendingAccounts] = useState([]);
 
-  // 1. Dynamic Supabase Loader (for Preview)
+  // 1. Dynamic Supabase Loader
   useEffect(() => {
     const loadSupabase = async () => {
       if (window.supabase) {
@@ -225,7 +228,8 @@ export default function App() {
          idUrl = await uploadImg(idFile, 'id');
          avatarUrl = await uploadImg(profileFile, 'avatar');
       } catch (e) {
-         console.warn("Storage not configured yet, using local preview");
+         console.warn("Storage upload check:", e);
+         // Fallback to local preview if storage fails (for testing)
          idUrl = idPreview;
          avatarUrl = profilePreview;
       }
@@ -328,12 +332,21 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-100">
+      {/* PROCESSING OVERLAY */}
       {isProcessing && (
         <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-sm flex flex-col items-center justify-center">
           <div className="bg-white p-8 rounded-[48px] shadow-2xl flex flex-col items-center animate-scale-up">
              <Loader2 className="text-blue-600 animate-spin mb-4" size={48} />
              <p className="font-black text-slate-800 uppercase tracking-widest text-sm">Processing...</p>
           </div>
+        </div>
+      )}
+      
+      {/* IMAGE VIEWER MODAL */}
+      {viewingImage && (
+        <div className="fixed inset-0 z-[400] bg-black/90 flex items-center justify-center p-4 backdrop-blur-md" onClick={() => setViewingImage(null)}>
+          <button className="absolute top-8 right-8 text-white/50 hover:text-white transition"><X size={32}/></button>
+          <img src={viewingImage} alt="ID View" className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl animate-scale-up" onClick={(e) => e.stopPropagation()} />
         </div>
       )}
 
@@ -427,7 +440,14 @@ export default function App() {
                       <p className="text-slate-400 text-xs mt-1">Institutional ID: {acc.student_number}</p>
                       <div className="flex gap-4 mt-3">
                         <a href={acc.fb_link} target="_blank" className="text-blue-600 flex items-center gap-1 font-bold text-xs hover:underline"><ExternalLink size={14}/> Messenger Profile</a>
-                        {acc.id_url && <a href={acc.id_url} target="_blank" className="text-amber-600 flex items-center gap-1 font-bold text-xs hover:underline"><ImageIcon size={14}/> View ID Upload</a>}
+                        {acc.id_url && (
+                          <button 
+                            onClick={() => setViewingImage(acc.id_url)} 
+                            className="text-amber-600 flex items-center gap-1 font-bold text-xs hover:underline"
+                          >
+                            <Eye size={14}/> View ID Upload
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -527,7 +547,6 @@ export default function App() {
               <input type="text" id="s-phone" placeholder="Contact Number" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
               <input type="password" id="s-pass" placeholder="Create Password" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold focus:ring-2 focus:ring-blue-500" />
               
-              {/* RESTORED: ID & Picture Section */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
                 <div 
                   onClick={() => document.getElementById('id-upload-input').click()}
@@ -605,7 +624,7 @@ export default function App() {
             <button onClick={() => setView('marketplace')} className="flex items-center gap-2 text-slate-400 mb-8 font-black text-xs tracking-widest uppercase hover:text-slate-800"><ArrowLeft size={16}/> Back to Marketplace</button>
             <div className="bg-white rounded-[56px] border shadow-sm overflow-hidden p-10">
               <h1 className="text-4xl font-black mb-4 leading-tight">{selectedCase.treatment}</h1>
-              <p className="text-slate-500 font-bold mb-10 text-lg">Managed by <span className="text-blue-600">{selectedCase.profiles?.full_name}</span></p>
+              <p className="text-slate-500 font-bold mb-10 text-lg">Managed by <span className="text-blue-600">{selectedCase.profiles?.full_name}</span> • {selectedCase.profiles?.school}</p>
               
               {selectedCase.selected_teeth?.length > 0 && (
                 <div className="mb-10">
@@ -721,7 +740,7 @@ export default function App() {
             <ShieldAlert size={48} className="mx-auto text-blue-600 mb-6" />
             <h3 className="text-3xl font-black mb-2">Admin Terminal</h3>
             <p className="text-slate-400 text-xs font-bold uppercase tracking-[0.3em] mb-8">Authorization Required</p>
-            <input type="password" id="admin-pin" placeholder="PIN" className="w-full p-5 bg-slate-50 rounded-2xl border-none font-black text-center tracking-[1em] mb-4" />
+            <input type="password" id="admin-pin" placeholder="PIN" className="w-full p-5 bg-slate-50 rounded-2xl border-none font-black text-center tracking-[1em] mb-4 focus:ring-2 focus:ring-blue-500" />
             <button onClick={() => {
               if (document.getElementById('admin-pin').value === ADMIN_PIN) {
                 setAdminAuthenticated(true);
@@ -741,6 +760,7 @@ export default function App() {
       {/* Extended Footer */}
       <footer className="py-20 text-center border-t border-slate-200 bg-white mt-12">
         <div className="inline-flex flex-col items-center gap-4">
+           {/* Footer logo also handles returning home and hidden admin sequence */}
            <div className="bg-blue-50 p-3 rounded-2xl shadow-sm cursor-pointer active:scale-95 transition-transform" onClick={handleLogoClick}>
              <Stethoscope size={32} className="text-blue-600" />
            </div>
